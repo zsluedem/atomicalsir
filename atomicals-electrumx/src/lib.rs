@@ -21,8 +21,9 @@ pub mod prelude {
 	/// atomicals-electrumx `Result` type.
 	pub type Result<T> = StdResult<T, Error>;
 }
-use prelude::*;
 
+use core::fmt::Debug;
+use prelude::*;
 // std
 use std::{future::Future, str::FromStr, time::Duration};
 // crates.io
@@ -45,7 +46,7 @@ pub trait Http {
 	fn post<U, P, R>(&self, uri: U, params: P) -> impl Future<Output = Result<R>> + Send
 	where
 		U: Send + Sync + AsRef<str>,
-		P: Send + Sync + Serialize,
+		P: Send + Sync + Serialize + Debug,
 		R: DeserializeOwned;
 }
 
@@ -68,7 +69,7 @@ pub trait Api: Send + Sync + Config + Http {
 			Ok(self
 				.post::<_, _, Response<ResponseResult<Ticker>>>(
 					self.uri_of("blockchain.atomicals.get_by_ticker"),
-					[ticker.as_ref()],
+					Params::new([ticker.as_ref()]),
 				)
 				.await?
 				.response
@@ -88,7 +89,7 @@ pub trait Api: Send + Sync + Config + Http {
 			Ok(self
 				.post::<_, _, Response<ResponseResult<Ft>>>(
 					self.uri_of("blockchain.atomicals.get_ft_info"),
-					[atomical_id.as_ref()],
+					Params::new([atomical_id.as_ref()]),
 				)
 				.await?
 				.response)
@@ -120,7 +121,7 @@ pub trait Api: Send + Sync + Config + Http {
 			let mut utxos = self
 				.post::<_, _, Response<Vec<Unspent>>>(
 					self.uri_of("blockchain.scripthash.listunspent"),
-					[scripthash.as_ref()],
+					Params::new([scripthash.as_ref()]),
 				)
 				.await?
 				.response
@@ -181,7 +182,7 @@ pub trait Api: Send + Sync + Config + Http {
 		async move {
 			self.post::<_, _, serde_json::Value>(
 				self.uri_of("blockchain.transaction.broadcast"),
-				[tx.as_ref()],
+				Params::new([tx.as_ref()]),
 			)
 			.await
 		}
@@ -216,18 +217,23 @@ impl Http for ElectrumX {
 	async fn post<U, P, R>(&self, uri: U, params: P) -> Result<R>
 	where
 		U: Send + Sync + AsRef<str>,
-		P: Send + Sync + Serialize,
+		P: Send + Sync + Serialize + Debug,
 		R: DeserializeOwned,
 	{
 		let u = uri.as_ref();
 
 		for _ in self.max_retries.clone() {
-			match self.client.post(u).json(&params).send().await {
-				Ok(r) => match r.json().await {
-					Ok(r) => return Ok(r),
-					Err(e) => {
-						tracing::error!("failed to parse response into JSON due to {e}");
-					},
+			let req = self.client.post(u).json(&params);
+			match req.send().await {
+				Ok(r) => {
+					let result = r.bytes().await?;
+					println!("{result:?}");
+					match serde_json::from_slice(&result) {
+						Ok(r) => return Ok(r),
+						Err(e) => {
+							tracing::error!("failed to parse response into JSON due to {e}");
+						},
+					}
 				},
 				Err(e) => {
 					tracing::error!("the request to {u} failed due to {e}");

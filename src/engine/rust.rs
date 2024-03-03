@@ -1,6 +1,6 @@
 // std
 use std::{
-	ops::Range,
+	ops::{Index, Range},
 	path::Path,
 	str::FromStr,
 	sync::{
@@ -50,6 +50,28 @@ pub async fn run(
 			// Test only.
 			// return Ok(());
 		}
+	}
+}
+
+fn bit_value(s: char) -> u64 {
+	match s {
+		'0' => 0,
+		'1' => 1,
+		'2' => 2,
+		'3' => 3,
+		'4' => 4,
+		'5' => 5,
+		'6' => 6,
+		'7' => 7,
+		'8' => 8,
+		'9' => 9,
+		'a' => 10,
+		'b' => 11,
+		'c' => 12,
+		'd' => 13,
+		'e' => 14,
+		'f' => 15,
+		_ => panic!("no hex"),
 	}
 }
 
@@ -157,26 +179,6 @@ impl Miner {
 			)?
 			.result();
 		let commit_txid = commit_tx.txid();
-		let commit_tx_hex = encode::serialize_hex(&commit_tx);
-
-		tracing::info!("broadcasting commit transaction {commit_txid}");
-		tracing::debug!("{commit_tx:#?}");
-		tracing::info!("{commit_tx_hex}");
-
-		// TODO?: Handle result.
-		self.api.broadcast(commit_tx_hex).await?;
-
-		let commit_txid_ = self
-			.api
-			.wait_until_utxo(
-				Address::from_script(&reveal_spk, self.network)?.to_string(),
-				fees.reveal_and_outputs,
-			)
-			.await?
-			.txid;
-
-		assert_eq!(commit_txid, commit_txid_.parse()?);
-
 		let mut reveal_psbt = Psbt::from_unsigned_tx(Transaction {
 			version: Self::VERSION,
 			lock_time: Self::LOCK_TIME,
@@ -235,7 +237,26 @@ impl Miner {
 		};
 		let reveal_txid = reveal_tx.txid();
 		let reveal_tx_hex = encode::serialize_hex(&reveal_tx);
+		let commit_txid = commit_tx.txid();
+		let commit_tx_hex = encode::serialize_hex(&commit_tx);
 
+		tracing::info!("broadcasting commit transaction {commit_txid}");
+		tracing::debug!("{commit_tx:#?}");
+		tracing::info!("{commit_tx_hex}");
+
+		// TODO?: Handle result.
+		self.api.broadcast(commit_tx_hex).await?;
+
+		let commit_txid_ = self
+			.api
+			.wait_until_utxo(
+				Address::from_script(&reveal_spk, self.network)?.to_string(),
+				fees.reveal_and_outputs,
+			)
+			.await?
+			.txid;
+
+		assert_eq!(commit_txid, commit_txid_.parse()?);
 		tracing::info!("broadcasting reveal transaction {reveal_txid}");
 		tracing::debug!("{reveal_tx:#?}");
 		tracing::info!("{reveal_tx_hex}");
@@ -253,7 +274,9 @@ impl Miner {
 	}
 
 	async fn prepare_data(&self, wallet: &Wallet) -> Result<Data> {
+		tracing::info!("Get ticker {}", self.ticker);
 		let id = self.api.get_by_ticker(&self.ticker).await?.atomical_id;
+		tracing::info!("Get ft {id:?}");
 		let response = self.api.get_ft_info(id).await?;
 		let global = response.global.unwrap();
 		let ft = response.result;
@@ -269,9 +292,6 @@ impl Miner {
 		}
 		if ft.mint_amount == 0 || ft.mint_amount >= 100_000_000 {
 			Err(anyhow::anyhow!("mint amount mismatch"))?;
-		}
-		if ft.dft_info.mint_count >= ft.max_mints {
-			Err(anyhow::anyhow!("max mints reached"))?;
 		}
 
 		let secp = Secp256k1::new();
@@ -289,7 +309,7 @@ impl Miner {
 				let (time, nonce) = util::time_nonce();
 
 				Payload {
-					bitworkc: ft.mint_bitworkc.clone(),
+					bitworkc: ft.dft_info.mint_bitworkc_current.clone(),
 					mint_ticker: ft.ticker.clone(),
 					nonce,
 					time,
@@ -304,12 +324,8 @@ impl Miner {
 			.add_leaf(0, reveal_script.clone())?
 			.finalize(&secp, wallet.funding.x_only_public_key)
 			.unwrap();
-		let fees = Self::fees_of(
-			satsbyte,
-			reveal_script.as_bytes().len(),
-			&additional_outputs,
-			ft.mint_bitworkr.is_some(),
-		);
+		let fees =
+			Self::fees_of(satsbyte, reveal_script.as_bytes().len(), &additional_outputs, false);
 		let funding_utxo = self
 			.api
 			.wait_until_utxo(wallet.funding.address.to_string(), fees.commit_and_reveal_and_outputs)
@@ -318,8 +334,8 @@ impl Miner {
 		Ok(Data {
 			secp,
 			satsbyte,
-			bitworkc: ft.mint_bitworkc,
-			bitworkr: ft.mint_bitworkr,
+			bitworkc: ft.dft_info.mint_bitworkc_current,
+			bitworkr: None,
 			additional_outputs,
 			reveal_script,
 			reveal_spend_info,
@@ -521,6 +537,9 @@ impl WorkerPool {
 			let p = p.clone();
 			let f = f.clone();
 			let difficulty = self.difficulty.clone();
+			let mut split = difficulty.split(".");
+			let bitwork = split.next().unwrap().to_string();
+			let bitworkx: u64 = split.next().unwrap().parse().unwrap();
 			let exit = exit.clone();
 			let result = self.result.clone();
 
@@ -531,14 +550,21 @@ impl WorkerPool {
 					}
 
 					let tx = f(&p, s)?;
+					let tx_id = tx.txid().to_string().trim_start_matches("0x").to_string();
+					if tx_id.starts_with(&bitwork) {
+						tracing::info!(
+							"Found prefix sulution {tx_id:?}, left : {:?}",
+							tx_id.chars().nth(bitwork.len()).unwrap()
+						);
 
-					if tx.txid().to_string().trim_start_matches("0x").starts_with(&difficulty) {
-						tracing::info!("solution found for {task}");
+						if bit_value(tx_id.chars().nth(bitwork.len()).unwrap()) >= bitworkx {
+							tracing::info!("solution found for {task}");
 
-						exit.store(true, Ordering::Relaxed);
-						*result.lock().unwrap() = Some(tx);
+							exit.store(true, Ordering::Relaxed);
+							*result.lock().unwrap() = Some(tx);
 
-						return Ok(());
+							return Ok(());
+						}
 					}
 				}
 

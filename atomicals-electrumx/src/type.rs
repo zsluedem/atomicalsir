@@ -3,7 +3,22 @@
 // std
 use std::collections::HashMap;
 // crates.io
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+#[derive(Debug, Serialize)]
+pub struct Params<P>
+where
+	P: Serialize,
+{
+	pub params: P,
+}
+impl<P> Params<P>
+where
+	P: Serialize,
+{
+	pub fn new(params: P) -> Self {
+		Self { params }
+	}
+}
 
 // TODO: Handle errors.
 #[derive(Debug, Deserialize)]
@@ -31,11 +46,7 @@ pub struct Global {
 
 #[derive(Debug, Deserialize)]
 pub struct Ticker {
-	pub status: String,
-	pub candidate_atomical_id: String,
 	pub atomical_id: String,
-	pub candidates: Vec<Candidate>,
-	pub r#type: String,
 }
 #[derive(Debug, Deserialize)]
 pub struct Candidate {
@@ -46,19 +57,27 @@ pub struct Candidate {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct DftInfo {
+	pub mint_count: u64,
+	pub mint_bitworkc_current: String,
+	pub mint_bitworkc_next: String,
+	pub mint_bitworkc_next_next: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct Ft {
 	#[serde(rename = "$bitwork")]
 	pub bitwork: Bitwork,
 	#[serde(rename = "$max_mints")]
 	pub max_mints: u64,
-	#[serde(rename = "$max_supply")]
-	pub max_supply: u64,
+	// #[serde(rename = "$max_supply")]
+	// pub max_supply: u64,
 	#[serde(rename = "$mint_amount")]
 	pub mint_amount: u64,
-	#[serde(rename = "$mint_bitworkc")]
-	pub mint_bitworkc: String,
-	#[serde(rename = "$mint_bitworkr")]
-	pub mint_bitworkr: Option<String>,
+	// #[serde(rename = "$mint_bitworkc")]
+	// pub mint_bitworkc: String,
+	// #[serde(rename = "$mint_bitworkr")]
+	// pub mint_bitworkr: Option<String>,
 	#[serde(rename = "$mint_height")]
 	pub mint_height: u64,
 	#[serde(rename = "$request_ticker")]
@@ -100,10 +119,6 @@ pub struct TickerCandidate {
 	pub txid: String,
 }
 #[derive(Debug, Deserialize)]
-pub struct DftInfo {
-	pub mint_count: u64,
-}
-#[derive(Debug, Deserialize)]
 pub struct LocationSummary {
 	pub circulating_supply: u64,
 	pub unique_holders: u64,
@@ -123,7 +138,7 @@ pub struct Args {
 	pub bitworkr: Option<String>,
 	pub max_mints: u64,
 	pub mint_amount: u64,
-	pub mint_bitworkc: String,
+	// pub mint_bitworkc: String,
 	pub mint_bitworkr: Option<String>,
 	pub mint_height: u64,
 	// TODO: It's a `String` in mainnet but a `u64` in testnet.
@@ -145,10 +160,10 @@ pub struct Legal {
 pub struct MintInfo {
 	#[serde(rename = "$bitwork")]
 	pub bitwork: Bitwork,
-	#[serde(rename = "$mint_bitworkc")]
-	pub mint_bitworkc: String,
-	#[serde(rename = "$mint_bitworkr")]
-	pub mint_bitworkr: Option<String>,
+	// #[serde(rename = "$mint_bitworkc")]
+	// pub mint_bitworkc: String,
+	// #[serde(rename = "$mint_bitworkr")]
+	// pub mint_bitworkr: Option<String>,
 	#[serde(rename = "$request_ticker")]
 	pub request_ticker: String,
 	pub args: Args,
